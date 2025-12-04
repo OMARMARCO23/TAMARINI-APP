@@ -2,15 +2,7 @@
 
 import { useState, useCallback } from 'react';
 
-interface UseOCRReturn {
-  processImage: (file: File) => Promise<string | null>;
-  isProcessing: boolean;
-  error: string | null;
-  result: string | null;
-  clearResult: () => void;
-}
-
-export function useOCR(): UseOCRReturn {
+export function useOCR() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
@@ -33,10 +25,8 @@ export function useOCR(): UseOCRReturn {
       }
 
       const data = await response.json();
-      const extractedText = data.text || '';
-
-      setResult(extractedText);
-      return extractedText;
+      setResult(data.text || '');
+      return data.text || '';
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to process image';
       setError(message);
