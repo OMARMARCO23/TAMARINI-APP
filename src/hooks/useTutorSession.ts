@@ -1,221 +1,61 @@
-import { useState, useCallback } from 'react';
-import { useSessionStore } from '@/store/sessionStore';
+'use client';
+
+import { useMemo } from 'react';
 import { useProgressStore } from '@/store/progressStore';
-import { Problem, Message, HintLevel, AnalysisResult, StepCheckResult } from '@/types';
-import { generateId } from '@/lib/utils';
+import { MathTopic } from '@/types';
+import { MATH_TOPICS } from '@/constants/topics';
 
-export function useTutorSession() {
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export function useProgress() {
+  const { progress, getTopicProgress, getOverallStats } = useProgressStore();
 
-  const {
-    currentSession,
-    startNewSession,
-    addMessage,
-    updateHintLevel,
-    completeStep,
-    incrementHints,
-    incrementAttempts,
-    completeSession,
-    abandonSession,
-  } = useSessionStore();
+  const overallStats = useMemo(() => getOverallStats(), [getOverallStats]);
 
-  const { recordProblemAttempt, recordProblemCompletion } = useProgressStore();
-
-  const analyzeProblem = useCallback(async (problemText: string): Promise<Problem | null> => {
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const response = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ problem: problemText }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to analyze problem');
-      }
-
-      const analysis: AnalysisResult = await response.json();
-
-      const problem: Problem = {
-        id: generateId(),
-        originalText: problemText,
-        topic: analysis.topic,
-        subTopic: analysis.subTopic,
-        difficulty: analysis.difficulty,
-        steps: analysis.steps.map((step, index) => ({
-          id: generateId(),
-          order: index + 1,
-          description: step.description,
-          hint: step.hint,
-          question: step.question,
-          expectedConcept: step.expectedConcept,
-          isCompleted: false,
-        })),
-        createdAt: new Date(),
+  const topicBreakdown = useMemo(() => {
+    return (Object.keys(MATH_TOPICS) as MathTopic[]).map((topic) => {
+      const stats = getTopicProgress(topic);
+      return {
+        topic,
+        name: MATH_TOPICS[topic].name,
+        icon: MATH_TOPICS[topic].icon,
+        ...stats,
+        completionRate: stats.attempted > 0
+          ? Math.round((stats.completed / stats.attempted) * 100)
+          : 0,
       };
+    }).sort((a, b) => b.completed - a.completed);
+  }, [getTopicProgress]);
 
-      startNewSession(problem);
-      recordProblemAttempt(problem.topic);
+  const recentActivity = useMemo(() => {
+    return topicBreakdown
+      .filter((t) => t.lastPracticed)
+      .sort((a, b) => {
+        const dateA = a.lastPracticed ? new Date(a.lastPracticed).getTime() : 0;
+        const dateB = b.lastPracticed ? new Date(b.lastPracticed).getTime() : 0;
+        return dateB - dateA;
+      })
+      .slice(0, 5);
+  }, [topicBreakdown]);
 
-      // Add welcome message
-      addMessage({
-        role: 'assistant',
-        content: `Great! I see you're working on a ${analysis.topic} problem about ${analysis.subTopic}. Let's break this down together!\n\nFirst, ${analysis.steps[0]?.question || "let's understand what we're solving."}`,
-        type: 'text',
-        metadata: { stepNumber: 1 },
-      });
+  const hintsImprovement = useMemo(() => {
+    const history = progress.hintsUsedHistory;
+    if (history.length < 10) return null;
 
-      return problem;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'An error occurred';
-      setError(message);
-      return null;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [startNewSession, addMessage, recordProblemAttempt]);
+    const firstHalf = history.slice(0, Math.floor(history.length / 2));
+    const secondHalf = history.slice(Math.floor(history.length / 2));
 
-  const requestHint = useCallback(async (level?: HintLevel): Promise<void> => {
-    if (!currentSession?.problem) return;
+    const firstAvg = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
 
-    setIsLoading(true);
-    setError(null);
-    
-    const hintLevel = level || Math.min(currentSession.currentHintLevel + 1, 5) as HintLevel;
-
-    try {
-      const response = await fetch('/api/hint', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          problem: currentSession.problem.originalText,
-          currentStep: currentSession.currentStep,
-          hintLevel,
-          previousHints: currentSession.messages
-            .filter((m) => m.type === 'hint')
-            .map((m) => m.content),
-        }),
-      });
-
-      if (!response.ok) throw new Error('Failed to get hint');
-
-      const { hint, question } = await response.json();
-
-      updateHintLevel(hintLevel);
-      incrementHints();
-
-      addMessage({
-        role: 'assistant',
-        content: `${hint}${question ? '\n\n' + question : ''}`,
-        type: 'hint',
-        metadata: { hintLevel, stepNumber: currentSession.currentStep + 1 },
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'An error occurred';
-      setError(message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentSession, updateHintLevel, incrementHints, addMessage]);
-
-  const submitAnswer = useCallback(async (answer: string): Promise<StepCheckResult | null> => {
-    if (!currentSession?.problem) return null;
-
-    setIsLoading(true);
-    setError(null);
-    incrementAttempts();
-
-    try {
-      // Add user message
-      addMessage({
-        role: 'user',
-        content: answer,
-        type: 'text',
-      });
-
-      const currentStepData = currentSession.problem.steps[currentSession.currentStep];
-
-      const response = await fetch('/api/check-step', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          problem: currentSession.problem.originalText,
-          stepDescription: currentStepData?.description || 'Solve the problem',
-          studentAnswer: answer,
-        }),
-      });
-
-      if (!response.ok) throw new Error('Failed to check answer');
-
-      const result: StepCheckResult = await response.json();
-
-      addMessage({
-        role: 'assistant',
-        content: `${result.feedback}\n\n${result.encouragement}${result.correctApproach ? '\n\n' + result.correctApproach : ''}`,
-        type: 'feedback',
-        metadata: { isCorrect: result.isCorrect },
-      });
-
-      if (result.isCorrect) {
-        completeStep(currentSession.currentStep, true);
-
-        // Check if problem is complete
-        const isComplete = currentSession.currentStep >= currentSession.problem.steps.length - 1;
-
-        if (isComplete) {
-          recordProblemCompletion(currentSession.problem.topic, currentSession.hintsUsed);
-          addMessage({
-            role: 'assistant',
-            content: "🎉 Excellent work! You've successfully solved this problem! Would you like to try a concept check quiz or work on a similar problem?",
-            type: 'text',
-          });
-        } else {
-          // Move to next step
-          const nextStep = currentSession.problem.steps[currentSession.currentStep + 1];
-          if (nextStep) {
-            addMessage({
-              role: 'assistant',
-              content: `Great! Now for the next step: ${nextStep.question}`,
-              type: 'question',
-              metadata: { stepNumber: currentSession.currentStep + 2 },
-            });
-          }
-        }
-      }
-
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'An error occurred';
-      setError(message);
-      return null;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [currentSession, addMessage, incrementAttempts, completeStep, recordProblemCompletion]);
-
-  const finishSession = useCallback(() => {
-    if (currentSession?.problem) {
-      recordProblemCompletion(currentSession.problem.topic, currentSession.hintsUsed);
-    }
-    completeSession();
-  }, [currentSession, completeSession, recordProblemCompletion]);
-
-  const handleAbandonSession = useCallback(() => {
-    abandonSession();
-    setError(null);
-  }, [abandonSession]);
+    if (firstAvg === 0) return null;
+    const improvement = ((firstAvg - secondAvg) / firstAvg) * 100;
+    return Math.round(improvement);
+  }, [progress.hintsUsedHistory]);
 
   return {
-    currentSession,
-    isLoading,
-    error,
-    analyzeProblem,
-    requestHint,
-    submitAnswer,
-    finishSession,
-    abandonSession: handleAbandonSession,
+    progress,
+    overallStats,
+    topicBreakdown,
+    recentActivity,
+    hintsImprovement,
   };
 }
