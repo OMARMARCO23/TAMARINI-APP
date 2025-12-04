@@ -68,7 +68,7 @@ Always answer in ${lang}.
     const model = genAI.getGenerativeModel({
       // You can change this to a newer model when available, for example:
       // model: "gemini-2.0-pro" or "gemini-2.5-pro"
-      model: "gemini-1.5-pro"
+      model: "gemini-2.5-pro"
     });
 
     const result = await model.generateContent(prompt);
