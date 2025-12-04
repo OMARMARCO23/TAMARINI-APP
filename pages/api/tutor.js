@@ -43,7 +43,6 @@ export default async function handler(req, res) {
       .json({ error: "Missing 'question' in JSON body" });
   }
 
-  // Build prompt
   const prompt = `
 ${systemInstructions}
 
@@ -72,18 +71,10 @@ Always answer in ${language}.
 `;
 
   try {
-    // IMPORTANT: use a valid model ID from Google AI Studio.
-    // For reliability, use Gemini 1.5 Flash (free tier) unless you are sure about 2.5 IDs.
-    //
-    // In Google AI Studio Playground:
-    //  - pick "Gemini 1.5 Flash"
-    //  - click "Get code" → JavaScript
-    //  - copy the model string, e.g.: "gemini-1.5-flash"
-    //
-    // Replace "gemini-1.5-flash" below if needed.
+    // Use a valid model ID. This one is safe and in free tier.
     const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
+      model: "gemini-2.5-flash"
     });
 
     const result = await model.generateContent(prompt);
@@ -94,7 +85,7 @@ Always answer in ${language}.
   } catch (err) {
     console.error("AI error:", err);
     return res.status(500).json({
-      error: err?.message || String(err) || "Unknown AI error",
+      error: err?.message || String(err) || "Unknown AI error"
     });
   }
 }
