@@ -23,7 +23,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // Check that the API key is present on the server
   if (!process.env.GOOGLE_API_KEY) {
     return res
       .status(500)
@@ -50,13 +49,13 @@ Student level: ${level}
 Preferred language: ${language}
 Stage: ${stage}
 
-Student question:
+Original exercise:
 ${question}
 
-Student attempt:
+Student latest message / attempt:
 ${attempt}
 
-Instructions for this stage:
+Stage rules:
 - If stage is "initial":
   - Ask 1–2 questions to understand what the student knows.
   - Give 1 small hint, no final answer.
@@ -66,15 +65,18 @@ Instructions for this stage:
 - If stage is "full":
   - Give a complete step-by-step explanation and final answer.
   - Emphasize the method and why each step is done.
+- If stage is "similar":
+  - Propose a NEW exercise that is similar in topic and difficulty to the original.
+  - Change the numbers so the student cannot copy.
+  - First give only the new exercise. Do not immediately give its solution unless the student clearly asks for it later.
 
 Always answer in ${language}.
 `;
 
   try {
-    // Use a valid model ID. This one is safe and in free tier.
     const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash"
+      model: "gemini-2.5-flash", // safe, fast model; change if you prefer another
     });
 
     const result = await model.generateContent(prompt);
@@ -85,7 +87,7 @@ Always answer in ${language}.
   } catch (err) {
     console.error("AI error:", err);
     return res.status(500).json({
-      error: err?.message || String(err) || "Unknown AI error"
+      error: err?.message || String(err) || "Unknown AI error",
     });
   }
 }
