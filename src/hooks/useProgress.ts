@@ -16,8 +16,8 @@ export function useProgress() {
         name: MATH_TOPICS[topic].name,
         icon: MATH_TOPICS[topic].icon,
         ...stats,
-        completionRate: stats.attempted > 0 
-          ? Math.round((stats.completed / stats.attempted) * 100) 
+        completionRate: stats.attempted > 0
+          ? Math.round((stats.completed / stats.attempted) * 100)
           : 0,
       };
     }).sort((a, b) => b.completed - a.completed);
@@ -44,6 +44,8 @@ export function useProgress() {
     const firstAvg = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
     const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
 
+    if (firstAvg === 0) return null;
+    
     const improvement = ((firstAvg - secondAvg) / firstAvg) * 100;
     return Math.round(improvement);
   }, [progress.hintsUsedHistory]);
