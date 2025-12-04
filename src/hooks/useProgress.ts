@@ -1,3 +1,5 @@
+'use client';
+
 import { useMemo } from 'react';
 import { useProgressStore } from '@/store/progressStore';
 import { MathTopic } from '@/types';
@@ -45,7 +47,6 @@ export function useProgress() {
     const secondAvg = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
 
     if (firstAvg === 0) return null;
-    
     const improvement = ((firstAvg - secondAvg) / firstAvg) * 100;
     return Math.round(improvement);
   }, [progress.hintsUsedHistory]);
