@@ -1,12 +1,12 @@
-import { genAI } from "../../lib/aiClient.js";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const systemInstructions = `
-You are "Tamarini", a tutor for students aged 12-18.
+You are "Tamarini", a tutor for students aged 12–18.
 
 Goals:
 - Help the student understand and solve homework.
 - Do NOT give the full final answer immediately.
-- First, ask 1-2 quick questions to see what the student understands.
+- First, ask 1–2 quick questions to see what the student understands.
 - Then give small, step-by-step hints.
 - Only give full solution when:
   - stage is "full" OR
@@ -23,7 +23,19 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { question, language, level, attempt, stage } = req.body || {};
+  // Check that the API key is present on the server
+  if (!process.env.GOOGLE_API_KEY) {
+    return res
+      .status(500)
+      .json({ error: "GOOGLE_API_KEY is not set on the server" });
+  }
+
+  const body = req.body || {};
+  const question = body.question;
+  const language = body.language || "French";
+  const level = body.level || "college";
+  const attempt = body.attempt || "No attempt yet.";
+  const stage = body.stage || "initial";
 
   if (!question) {
     return res
@@ -31,24 +43,19 @@ export default async function handler(req, res) {
       .json({ error: "Missing 'question' in JSON body" });
   }
 
-  // Default values
-  const lang = language || "French";
-  const lvl = level || "college"; // 'college' or 'lycee'
-  const stg = stage || "initial";
-  const att = attempt || "No attempt yet.";
-
+  // Build prompt
   const prompt = `
 ${systemInstructions}
 
-Student level: ${lvl}
-Preferred language: ${lang}
-Stage: ${stg}
+Student level: ${level}
+Preferred language: ${language}
+Stage: ${stage}
 
 Student question:
 ${question}
 
 Student attempt:
-${att}
+${attempt}
 
 Instructions for this stage:
 - If stage is "initial":
@@ -61,14 +68,22 @@ Instructions for this stage:
   - Give a complete step-by-step explanation and final answer.
   - Emphasize the method and why each step is done.
 
-Always answer in ${lang}.
+Always answer in ${language}.
 `;
 
   try {
+    // IMPORTANT: use a valid model ID from Google AI Studio.
+    // For reliability, use Gemini 1.5 Flash (free tier) unless you are sure about 2.5 IDs.
+    //
+    // In Google AI Studio Playground:
+    //  - pick "Gemini 1.5 Flash"
+    //  - click "Get code" → JavaScript
+    //  - copy the model string, e.g.: "gemini-1.5-flash"
+    //
+    // Replace "gemini-1.5-flash" below if needed.
+    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
     const model = genAI.getGenerativeModel({
-      // You can change this to a newer model when available, for example:
-      // model: "gemini-2.0-pro" or "gemini-2.5-pro"
-      model: "gemini-2.5-pro"
+      model: "gemini-1.5-flash",
     });
 
     const result = await model.generateContent(prompt);
@@ -78,6 +93,8 @@ Always answer in ${lang}.
     return res.status(200).json({ reply: text });
   } catch (err) {
     console.error("AI error:", err);
-    return res.status(500).json({ error: "AI error" });
+    return res.status(500).json({
+      error: err?.message || String(err) || "Unknown AI error",
+    });
   }
 }
