@@ -1,87 +1,80 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 const INITIAL_MESSAGE =
   "Salut, je suis TAMARINI.\nEnvoie une photo claire de ton exercice de maths, ou écris-le ici, puis explique-moi ce que tu as compris. Je vais te guider étape par étape, et à la fin on vérifiera ta réponse ensemble.";
 
 export default function HomePage() {
+  // First message of the student = original exercise
   const [exercise, setExercise] = useState("");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([
     { from: "tamarini", text: INITIAL_MESSAGE },
   ]);
-  const [stage, setStage] = useState("initial"); // "initial" → "hint1" → "hint2"
+  const [hintLevel, setHintLevel] = useState(0); // 0 -> initial, 1 -> hint1, 2 -> hint2, 3+ -> full
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-
-  const chatEndRef = useRef(null);
-
-  // Auto‑scroll to latest message
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages]);
 
   function resetConversation() {
     setExercise("");
     setInput("");
-    setStage("initial");
+    setHintLevel(0);
     setError("");
     setMessages([{ from: "tamarini", text: INITIAL_MESSAGE }]);
   }
 
-  async function callApi(selectedStage) {
-    // We always need an exercise statement
-    if (!exercise.trim()) {
-      setError("Ajoute d'abord l'énoncé de ton exercice en haut.");
+  async function handleSend() {
+    if (!input.trim()) {
+      setError(
+        "Écris ce que tu comprends, ta démarche, ou ta réponse avant d'envoyer."
+      );
       return;
     }
 
-    // For normal help, we expect the student to write something
-    if (!input.trim() && selectedStage !== "similar") {
-      setError("Écris ce que tu comprends, ta démarche, ou ta réponse avant d'envoyer.");
-      return;
-    }
-
+    const text = input.trim();
     setError("");
     setLoading(true);
 
-    const outgoingMessages = [...messages];
+    // Add student's message to chat
+    setMessages((prev) => [...prev, { from: "student", text }]);
+    setInput("");
 
-    // For "Similaire", we don't add a new student bubble
-    if (selectedStage !== "similar" && input.trim()) {
-      outgoingMessages.push({ from: "student", text: input.trim() });
+    const isFirst = !exercise; // no exercise yet
+    const question = isFirst ? text : exercise;
+    const attempt = isFirst ? "" : text;
+
+    // Decide how much help to ask from Tamarini
+    let stage;
+    if (isFirst) {
+      stage = "initial";
+    } else if (hintLevel === 0) {
+      stage = "hint1";
+    } else if (hintLevel === 1) {
+      stage = "hint2";
+    } else {
+      stage = "full";
     }
-
-    setMessages(outgoingMessages);
 
     try {
       const res = await fetch("/api/tutor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: exercise,       // énoncé de l'exercice
+          question,
           language: "French",
-          level: "college",         // à affiner plus tard
-          attempt: input.trim() || "",
-          stage: selectedStage,
+          level: "college",
+          attempt,
+          stage,
         }),
       });
 
       const data = await res.json();
 
       if (data.reply) {
-        setMessages((prev) => [
-          ...prev,
-          { from: "tamarini", text: data.reply },
-        ]);
-        setInput("");
-
-        // Faire avancer le niveau d'aide automatiquement
-        if (selectedStage === "initial") {
-          setStage("hint1");
-        } else if (selectedStage === "hint1") {
-          setStage("hint2");
+        setMessages((prev) => [...prev, { from: "tamarini", text: data.reply }]);
+        if (isFirst) {
+          setExercise(text); // store original exercise
+        } else {
+          setHintLevel((prev) => Math.min(prev + 1, 3));
         }
       } else if (data.error) {
         setError("Erreur serveur : " + data.error);
@@ -90,24 +83,59 @@ export default function HomePage() {
       }
     } catch (err) {
       console.error("Network error:", err);
-      setError("Impossible de contacter le serveur. Vérifie ta connexion internet.");
+      setError(
+        "Impossible de contacter le serveur. Vérifie ta connexion internet."
+      );
     } finally {
       setLoading(false);
     }
   }
 
-  function handleSend() {
-    // Utilise le stage courant pour déterminer la profondeur des indices
-    callApi(stage);
-  }
+  async function handleSimilar() {
+    if (!exercise) {
+      setError("Envoie d'abord l'exercice (ton premier message) avant de demander un similaire.");
+      return;
+    }
 
-  function handleSimilar() {
-    // Demande un exercice similaire
-    callApi("similar");
+    setError("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/tutor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: exercise,
+          language: "French",
+          level: "college",
+          attempt: "",
+          stage: "similar",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (data.reply) {
+        setMessages((prev) => [...prev, { from: "tamarini", text: data.reply }]);
+      } else if (data.error) {
+        setError("Erreur serveur : " + data.error);
+      } else {
+        setError("Réponse inconnue du serveur.");
+      }
+    } catch (err) {
+      console.error("Network error:", err);
+      setError(
+        "Impossible de contacter le serveur. Vérifie ta connexion internet."
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   function handleImageClick() {
-    alert("La fonctionnalité d'image arrivera bientôt dans l'application mobile.");
+    alert(
+      "La fonctionnalité d'image sera disponible dans l'application mobile. Pour l'instant, colle simplement ton exercice en texte."
+    );
   }
 
   return (
@@ -126,17 +154,6 @@ export default function HomePage() {
             Nouvel exercice
           </button>
         </header>
-
-        {/* Exercise input */}
-        <section style={styles.exerciseSection}>
-          <label style={styles.sectionLabel}>Énoncé de l'exercice</label>
-          <textarea
-            style={styles.exerciseInput}
-            placeholder="Colle ici l’énoncé de ton exercice (texte). Pour une photo, tu pourras bientôt utiliser l’application mobile."
-            value={exercise}
-            onChange={(e) => setExercise(e.target.value)}
-          />
-        </section>
 
         {/* Chat area */}
         <section style={styles.chatSection}>
@@ -166,14 +183,17 @@ export default function HomePage() {
                 </div>
               </div>
             ))}
-            <div ref={chatEndRef} />
           </div>
         </section>
 
         {/* Bottom input & controls */}
         <section style={styles.bottomPanel}>
           <div style={styles.bottomTopRow}>
-            <button style={styles.imageBtn} onClick={handleImageClick}>
+            <button
+              type="button"
+              style={styles.imageBtn}
+              onClick={handleImageClick}
+            >
               <span style={{ marginRight: 6 }}>📷</span> Image
             </button>
           </div>
@@ -188,13 +208,19 @@ export default function HomePage() {
 
             <div style={styles.sendButtons}>
               <button
-                style={styles.secondaryBtn}
+                type="button"
+                style={{
+                  ...styles.secondaryBtn,
+                  opacity: exercise ? 1 : 0.5,
+                  cursor: exercise ? "pointer" : "not-allowed",
+                }}
                 onClick={handleSimilar}
-                disabled={loading || !exercise.trim()}
+                disabled={!exercise || loading}
               >
                 Similaire
               </button>
               <button
+                type="button"
                 style={styles.primaryBtn}
                 onClick={handleSend}
                 disabled={loading}
@@ -207,7 +233,7 @@ export default function HomePage() {
           {error && <div style={styles.errorText}>{error}</div>}
         </section>
 
-        {/* Bottom nav (static for now) */}
+        {/* Bottom nav (static) */}
         <footer style={styles.bottomNav}>
           <div style={{ ...styles.navItem, ...styles.navItemActive }}>
             <span style={styles.navIcon}>🏠</span>
@@ -230,7 +256,7 @@ export default function HomePage() {
 const styles = {
   page: {
     minHeight: "100vh",
-    background: "linear-gradient(135deg, #eef2ff, #e3f2fd)",
+    background: "#0f172a",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -241,7 +267,7 @@ const styles = {
     maxWidth: 960,
     background: "#ffffff",
     borderRadius: 24,
-    boxShadow: "0 18px 50px rgba(15, 23, 42, 0.12)",
+    boxShadow: "0 18px 50px rgba(15, 23, 42, 0.35)",
     display: "flex",
     flexDirection: "column",
     padding: 16,
@@ -251,7 +277,7 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "4px 4px 8px 4px",
+    paddingBottom: 8,
     borderBottom: "1px solid #e5e7eb",
   },
   brand: {
@@ -291,29 +317,9 @@ const styles = {
     cursor: "pointer",
     fontSize: 14,
   },
-  exerciseSection: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-  },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: "#4b5563",
-  },
-  exerciseInput: {
-    width: "100%",
-    minHeight: 70,
-    borderRadius: 16,
-    border: "1px solid #e5e7eb",
-    padding: 10,
-    fontSize: 14,
-    resize: "vertical",
-    outline: "none",
-  },
   chatSection: {
     flex: 1,
-    minHeight: 220,
+    minHeight: 260,
     borderRadius: 18,
     border: "1px solid #e5e7eb",
     background: "#f9fafb",
@@ -398,7 +404,6 @@ const styles = {
     border: "1px solid #d1d5db",
     background: "#ffffff",
     fontSize: 13,
-    cursor: "pointer",
   },
   primaryBtn: {
     padding: "8px 10px",
