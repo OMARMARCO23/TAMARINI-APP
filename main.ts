@@ -1,5 +1,3 @@
-import { serve } from "https://deno.land/std@0.220.0/http/server.ts";
-
 const GOOGLE_API_KEY = Deno.env.get("GOOGLE_API_KEY");
 
 const corsHeaders = {
@@ -76,43 +74,6 @@ const homepage = `
 </html>
 `;
 
-// Main request handler
-async function handler(req: Request): Promise<Response> {
-  const url = new URL(req.url);
-  const path = url.pathname;
-
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  // Homepage
-  if (path === "/" && req.method === "GET") {
-    return new Response(homepage, {
-      headers: { ...corsHeaders, "Content-Type": "text/html" },
-    });
-  }
-
-  // Health check
-  if (path === "/api/health") {
-    return Response.json(
-      { status: "ok", timestamp: new Date().toISOString() },
-      { headers: corsHeaders }
-    );
-  }
-
-  // Chat endpoint
-  if (path === "/api/chat" && req.method === "POST") {
-    return await handleChat(req);
-  }
-
-  // 404 for everything else
-  return Response.json(
-    { error: "Not found" },
-    { status: 404, headers: corsHeaders }
-  );
-}
-
 // Chat handler
 async function handleChat(req: Request): Promise<Response> {
   try {
@@ -120,16 +81,16 @@ async function handleChat(req: Request): Promise<Response> {
     const { question, language = "en", history = [] } = body;
 
     if (!question) {
-      return Response.json(
-        { error: "Question is required" },
-        { status: 400, headers: corsHeaders }
+      return new Response(
+        JSON.stringify({ error: "Question is required" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     if (!GOOGLE_API_KEY) {
-      return Response.json(
-        { error: "API key not configured" },
-        { status: 500, headers: corsHeaders }
+      return new Response(
+        JSON.stringify({ error: "API key not configured" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
@@ -179,31 +140,68 @@ YOUR HELPFUL RESPONSE:
 
     if (!response.ok) {
       console.error("Gemini Error:", data);
-      return Response.json(
-        { error: "Gemini API error", details: data.error?.message },
-        { status: 500, headers: corsHeaders }
+      return new Response(
+        JSON.stringify({ error: "Gemini API error", details: data.error?.message }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     const reply = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!reply) {
-      return Response.json(
-        { error: "No response from Gemini" },
-        { status: 500, headers: corsHeaders }
+      return new Response(
+        JSON.stringify({ error: "No response from Gemini" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    return Response.json({ reply }, { headers: corsHeaders });
+    return new Response(
+      JSON.stringify({ reply }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
 
   } catch (error) {
     console.error("Error:", error);
-    return Response.json(
-      { error: "Failed to process request" },
-      { status: 500, headers: corsHeaders }
+    return new Response(
+      JSON.stringify({ error: "Failed to process request" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
 }
 
-// Start server
-serve(handler);
+// Main handler
+Deno.serve((req: Request) => {
+  const url = new URL(req.url);
+  const path = url.pathname;
+
+  // Handle CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  // Homepage
+  if (path === "/" && req.method === "GET") {
+    return new Response(homepage, {
+      headers: { ...corsHeaders, "Content-Type": "text/html" },
+    });
+  }
+
+  // Health check
+  if (path === "/api/health") {
+    return new Response(
+      JSON.stringify({ status: "ok", timestamp: new Date().toISOString() }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Chat endpoint
+  if (path === "/api/chat" && req.method === "POST") {
+    return handleChat(req);
+  }
+
+  // 404 for everything else
+  return new Response(
+    JSON.stringify({ error: "Not found" }),
+    { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+});
