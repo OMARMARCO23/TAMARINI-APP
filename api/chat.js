@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // Set CORS headers
+  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -9,77 +9,65 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Handle GET request (for testing)
+  // Handle GET (for testing)
   if (req.method === 'GET') {
-    return res.status(200).json({ 
+    return res.status(200).json({
       message: "Tamrini API is working!",
-      model: "gemini-2.0-flash",
-      usage: "POST /api/chat with {question, language}"
+      usage: "POST /api/chat with { question, language }"
     });
   }
 
-  // Handle POST request
+  // Handle POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { question, language = 'en', history = [] } = req.body;
+  const { question, language = 'en', history = [] } = req.body || {};
 
   if (!question) {
     return res.status(400).json({ error: 'Question is required' });
   }
 
   const API_KEY = process.env.GOOGLE_API_KEY;
-  
+
   if (!API_KEY) {
     return res.status(500).json({ error: 'API key not configured' });
   }
 
-  // ✅ Updated to Gemini 2.0 Flash
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
-  const languageInstructions = {
+  const langText = {
     en: 'Respond in English.',
     fr: 'Réponds en français.',
     ar: 'أجب باللغة العربية.',
   };
 
-  const systemPrompt = `
-You are Tamrini, a friendly and encouraging math tutor for students aged 12-18.
+  const prompt = `
+You are Tamrini, a friendly math tutor for students aged 12-18.
 
-YOUR RULES:
-1. NEVER give direct answers to math problems
-2. Ask guiding questions to help students think
-3. Break problems into smaller steps
-4. Celebrate small wins and encourage them
-5. Use simple, age-appropriate language
-6. If they're stuck, give gentle hints
-7. Use emojis occasionally to be friendly 😊
+RULES:
+- NEVER give direct answers
+- Ask guiding questions
+- Break problems into steps
+- Encourage the student
+- Use simple language
+- Use emojis occasionally 😊
 
-${languageInstructions[language] || languageInstructions.en}
+${langText[language] || langText.en}
 
-CONVERSATION HISTORY:
-${history.map(msg => `${msg.role}: ${msg.content}`).join('\n') || 'New conversation'}
+History: ${JSON.stringify(history)}
 
-STUDENT'S QUESTION: ${question}
+Student: ${question}
 
-YOUR RESPONSE:
-`;
+Your response:`;
 
   try {
     const response = await fetch(`${API_URL}?key=${API_KEY}`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{
-          parts: [{ text: systemPrompt }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 500,
-        },
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
       }),
     });
 
@@ -87,21 +75,18 @@ YOUR RESPONSE:
 
     if (!response.ok) {
       console.error('Gemini Error:', data);
-      return res.status(500).json({ 
-        error: 'Gemini API error',
-        details: data.error?.message || 'Unknown error'
+      return res.status(500).json({
+        error: 'Gemini error',
+        details: data.error?.message
       });
     }
 
-    if (!data.candidates || !data.candidates[0]) {
-      return res.status(500).json({ error: 'No response from Gemini' });
-    }
+    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
 
-    const reply = data.candidates[0].content.parts[0].text;
     return res.status(200).json({ reply });
 
   } catch (error) {
     console.error('Error:', error);
-    return res.status(500).json({ error: 'Failed to connect to Gemini' });
+    return res.status(500).json({ error: 'Server error' });
   }
 }
