@@ -116,9 +116,12 @@ Your response (remember: guide, don't give answers):`;
         contents: [{ 
           parts: [{ text: fullPrompt }] 
         }],
+
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 300
+          maxOutputTokens: 500,  // Increased from 300
+          topP: 0.9,
+          topK: 40
         }
       })
     });
