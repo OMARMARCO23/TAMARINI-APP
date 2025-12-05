@@ -1,28 +1,24 @@
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // Handle preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // Handle GET (for testing)
   if (req.method === 'GET') {
     return res.status(200).json({
       message: "Tamrini API is working!",
-      usage: "POST /api/chat with { question, language }"
+      usage: "POST /api/chat with { question, language, history, systemPrompt }"
     });
   }
 
-  // Handle POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { question, language = 'en', history = [] } = req.body || {};
+  const { question, language = 'en', history = [], systemPrompt } = req.body || {};
 
   if (!question) {
     return res.status(400).json({ error: 'Question is required' });
@@ -34,40 +30,35 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'API key not configured' });
   }
 
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
-  const langText = {
-    en: 'Respond in English.',
-    fr: 'Réponds en français.',
-    ar: 'أجب باللغة العربية.',
-  };
+  // Use custom prompt if provided, otherwise use default
+  const defaultPrompt = `You are Tamrini, a math tutor. Help students solve problems step by step. Never give direct answers. Keep responses short and clear. Respond in ${language === 'ar' ? 'Arabic' : language === 'fr' ? 'French' : 'English'}.`;
+  
+  const finalPrompt = systemPrompt || defaultPrompt;
 
-  const prompt = `
-You are Tamrini, a friendly math tutor for students aged 12-18.
+  // Build conversation
+  const conversationText = history.map(m => `${m.role}: ${m.content}`).join('\n');
 
-RULES:
-- NEVER give direct answers
-- Ask guiding questions
-- Break problems into steps
-- Encourage the student
-- Use simple language
-- Use emojis occasionally 😊
+  const fullPrompt = `${finalPrompt}
 
-${langText[language] || langText.en}
+CONVERSATION:
+${conversationText}
 
-History: ${JSON.stringify(history)}
+USER: ${question}
 
-Student: ${question}
-
-Your response:`;
+ASSISTANT:`;
 
   try {
     const response = await fetch(`${API_URL}?key=${API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.7, maxOutputTokens: 500 },
+        contents: [{ parts: [{ text: fullPrompt }] }],
+        generationConfig: { 
+          temperature: 0.7, 
+          maxOutputTokens: 300 
+        },
       }),
     });
 
