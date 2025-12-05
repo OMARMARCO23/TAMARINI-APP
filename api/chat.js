@@ -9,10 +9,11 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // Handle GET request (for testing in browser)
+  // Handle GET request (for testing)
   if (req.method === 'GET') {
     return res.status(200).json({ 
-      message: "Tamrini API is working! Use POST to chat.",
+      message: "Tamrini API is working!",
+      model: "gemini-2.0-flash",
       usage: "POST /api/chat with {question, language}"
     });
   }
@@ -34,7 +35,8 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'API key not configured' });
   }
 
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+  // ✅ Updated to Gemini 2.0 Flash
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
   const languageInstructions = {
     en: 'Respond in English.',
@@ -56,17 +58,12 @@ YOUR RULES:
 
 ${languageInstructions[language] || languageInstructions.en}
 
-EXAMPLE INTERACTION:
-Student: "What is 2x + 5 = 15?"
-You: "Great question! Let's solve this together. First, what do you think we should do to isolate x? What's on the left side that we could move? 🤔"
-
-CONVERSATION SO FAR:
+CONVERSATION HISTORY:
 ${history.map(msg => `${msg.role}: ${msg.content}`).join('\n') || 'New conversation'}
 
-STUDENT'S NEW MESSAGE:
-${question}
+STUDENT'S QUESTION: ${question}
 
-YOUR HELPFUL RESPONSE:
+YOUR RESPONSE:
 `;
 
   try {
@@ -86,19 +83,25 @@ YOUR HELPFUL RESPONSE:
       }),
     });
 
+    const data = await response.json();
+
     if (!response.ok) {
-      const errorData = await response.text();
-      console.error('Gemini API Error:', errorData);
-      return res.status(500).json({ error: 'Gemini API request failed' });
+      console.error('Gemini Error:', data);
+      return res.status(500).json({ 
+        error: 'Gemini API error',
+        details: data.error?.message || 'Unknown error'
+      });
     }
 
-    const data = await response.json();
-    const reply = data.candidates[0].content.parts[0].text;
+    if (!data.candidates || !data.candidates[0]) {
+      return res.status(500).json({ error: 'No response from Gemini' });
+    }
 
+    const reply = data.candidates[0].content.parts[0].text;
     return res.status(200).json({ reply });
 
   } catch (error) {
     console.error('Error:', error);
-    return res.status(500).json({ error: 'Failed to get response' });
+    return res.status(500).json({ error: 'Failed to connect to Gemini' });
   }
 }
