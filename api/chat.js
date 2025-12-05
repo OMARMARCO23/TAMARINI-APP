@@ -30,7 +30,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'API key not configured' });
   }
 
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
   // Use custom prompt if provided, otherwise use default
   const defaultPrompt = `You are Tamrini, a math tutor. Help students solve problems step by step. Never give direct answers. Keep responses short and clear. Respond in ${language === 'ar' ? 'Arabic' : language === 'fr' ? 'French' : 'English'}.`;
