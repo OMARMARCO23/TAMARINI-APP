@@ -1,0 +1,13 @@
+{
+  "appName": "Tamrini",
+  "tagline": "Ton Tuteur de Maths",
+  "startChat": "Commencer",
+  "typeMessage": "Écris ta question de maths...",
+  "send": "Envoyer",
+  "welcome": "Salut! 👋 Je suis Tamrini, ton tuteur de maths. Sur quel problème travailles-tu aujourd'hui?",
+  "thinking": "Je réfléchis...",
+  "error": "Oups! Une erreur s'est produite. Réessaie.",
+  "quotaError": "Trop de demandes! Attends un moment et réessaie.",
+  "selectLanguage": "Langue",
+  "back": "Retour"
+}
