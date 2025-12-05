@@ -1,20 +1,39 @@
 export default async function handler(req, res) {
-  // Handle CORS preflight
+  // Set CORS headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Handle preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
+  // Handle GET request (for testing in browser)
+  if (req.method === 'GET') {
+    return res.status(200).json({ 
+      message: "Tamrini API is working! Use POST to chat.",
+      usage: "POST /api/chat with {question, language}"
+    });
+  }
+
+  // Handle POST request
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { question, language, history } = req.body;
+  const { question, language = 'en', history = [] } = req.body;
 
   if (!question) {
     return res.status(400).json({ error: 'Question is required' });
   }
 
   const API_KEY = process.env.GOOGLE_API_KEY;
+  
+  if (!API_KEY) {
+    return res.status(500).json({ error: 'API key not configured' });
+  }
+
   const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
 
   const languageInstructions = {
@@ -42,7 +61,7 @@ Student: "What is 2x + 5 = 15?"
 You: "Great question! Let's solve this together. First, what do you think we should do to isolate x? What's on the left side that we could move? 🤔"
 
 CONVERSATION SO FAR:
-${history ? history.map(msg => `${msg.role}: ${msg.content}`).join('\n') : 'New conversation'}
+${history.map(msg => `${msg.role}: ${msg.content}`).join('\n') || 'New conversation'}
 
 STUDENT'S NEW MESSAGE:
 ${question}
@@ -68,8 +87,9 @@ YOUR HELPFUL RESPONSE:
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || 'API request failed');
+      const errorData = await response.text();
+      console.error('Gemini API Error:', errorData);
+      return res.status(500).json({ error: 'Gemini API request failed' });
     }
 
     const data = await response.json();
@@ -78,7 +98,7 @@ YOUR HELPFUL RESPONSE:
     return res.status(200).json({ reply });
 
   } catch (error) {
-    console.error('Gemini API Error:', error);
+    console.error('Error:', error);
     return res.status(500).json({ error: 'Failed to get response' });
   }
 }
