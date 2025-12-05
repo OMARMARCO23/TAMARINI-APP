@@ -1,0 +1,17 @@
+{
+  "appName": "Tamrini",
+  "tagline": "Your Math Tutor",
+  "startChat": "Start Learning",
+  "typeMessage": "Type your math question...",
+  "send": "Send",
+  "hint": "Need a hint?",
+  "welcome": "Hello! I'm Tamrini, your math tutor. What problem are you working on?",
+  "thinking": "Thinking...",
+  "selectLanguage": "Select Language",
+  "mathTopics": {
+    "algebra": "Algebra",
+    "geometry": "Geometry",
+    "calculus": "Calculus",
+    "statistics": "Statistics"
+  }
+}
