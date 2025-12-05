@@ -5,58 +5,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Tamrini API</title>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: 'Segoe UI', Arial, sans-serif;
       min-height: 100vh;
       display: flex;
       justify-content: center;
       align-items: center;
-      background: linear-gradient(135deg, #2C3E50 0%, #3498DB 100%);
+      background: linear-gradient(135deg, #2C3E50, #3498DB);
       color: white;
       text-align: center;
       padding: 20px;
     }
-    .container {
-      max-width: 500px;
-    }
-    .logo {
-      font-size: 80px;
-      margin-bottom: 20px;
-    }
-    h1 {
-      font-size: 3rem;
-      margin-bottom: 10px;
-    }
-    .tagline {
-      font-size: 1.2rem;
-      color: #BDC3C7;
-      margin-bottom: 30px;
-    }
+    .container { max-width: 500px; }
+    .logo { font-size: 80px; margin-bottom: 20px; }
+    h1 { font-size: 2.5rem; margin-bottom: 10px; }
+    .tagline { color: #BDC3C7; margin-bottom: 30px; }
     .status {
       background: rgba(255,255,255,0.1);
       padding: 20px;
       border-radius: 15px;
-      margin-bottom: 20px;
     }
-    .status-badge {
-      display: inline-block;
+    .badge {
       background: #27AE60;
-      padding: 5px 15px;
+      padding: 8px 20px;
       border-radius: 20px;
       font-size: 0.9rem;
-      margin-bottom: 10px;
+      display: inline-block;
+      margin-bottom: 15px;
     }
-    .endpoint {
-      background: rgba(0,0,0,0.2);
+    code {
+      background: rgba(0,0,0,0.3);
       padding: 10px 20px;
       border-radius: 8px;
       font-family: monospace;
-      font-size: 0.9rem;
+      display: block;
+      margin-top: 10px;
     }
   </style>
 </head>
@@ -64,12 +48,11 @@
   <div class="container">
     <div class="logo">📐</div>
     <h1>Tamrini API</h1>
-    <p class="tagline">Math Tutoring API for Students</p>
-    
+    <p class="tagline">Math Tutoring for Students 12-18</p>
     <div class="status">
-      <span class="status-badge">✓ Online</span>
+      <span class="badge">✓ Online</span>
       <p>API Endpoint:</p>
-      <div class="endpoint">POST /api/chat</div>
+      <code>POST /api/chat</code>
     </div>
   </div>
 </body>
