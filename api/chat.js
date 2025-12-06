@@ -9,7 +9,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'GET') {
-    return res.status(200).json({ message: "Tamrini API v2.2" });
+    return res.status(200).json({ message: "Tamrini API v2.5" });
   }
 
   if (req.method !== 'POST') {
@@ -17,11 +17,6 @@ export default async function handler(req, res) {
   }
 
   const { question, language = 'en', history = [], image } = req.body || {};
-
-  console.log('--- NEW REQUEST ---');
-  console.log('Question:', question);
-  console.log('Language:', language);
-  console.log('Has image:', !!image);
 
   if (!question && !image) {
     return res.status(400).json({ error: 'Question or image required' });
@@ -32,75 +27,76 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'API key not configured' });
   }
 
+  // ===== USE GEMINI 2.5 FLASH =====
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent';
+
+  // ===== SHORTER PROMPTS = LESS TOKENS =====
   const prompts = {
-    en: `You are Tamrini, a math tutor. If there's an image, describe the math problem you see. Never give direct answers. Ask guiding questions. Keep responses short (2-4 sentences). Respond in English.`,
-    fr: `Tu es Tamrini, tuteur de maths. S'il y a une image, décris le problème de maths. Ne donne jamais la réponse directe. Pose des questions pour guider. Réponses courtes (2-4 phrases). Réponds en français.`,
-    ar: `أنت تمريني معلم رياضيات. إذا كانت هناك صورة، صف المسألة. لا تعطي الإجابة مباشرة. اطرح أسئلة توجيهية. إجابات قصيرة. أجب بالعربية.`
+    en: `You are Tamrini, a math tutor. Rules:
+- If image: describe the math problem briefly
+- Never give direct answers
+- Ask ONE guiding question
+- Keep response under 3 sentences
+Respond in English.`,
+
+    fr: `Tu es Tamrini, tuteur de maths. Règles:
+- Si image: décris brièvement le problème
+- Ne donne jamais la réponse directe
+- Pose UNE question pour guider
+- Maximum 3 phrases
+Réponds en français.`,
+
+    ar: `أنت تمريني، معلم رياضيات. القواعد:
+- إذا صورة: صف المسألة باختصار
+- لا تعطي الإجابة مباشرة
+- اطرح سؤالاً واحداً
+- 3 جمل كحد أقصى
+أجب بالعربية.`
   };
 
   const systemPrompt = prompts[language] || prompts.en;
 
+  // ===== SHORTER HISTORY = LESS TOKENS =====
   let conversationText = '';
   if (history && history.length > 0) {
-    history.slice(-6).forEach(m => {
-      conversationText += (m.role === 'assistant' ? 'Tutor' : 'Student') + ': ' + m.content + '\n';
+    // Only use last 4 messages instead of 6
+    history.slice(-4).forEach(m => {
+      const role = m.role === 'assistant' ? 'T' : 'S';
+      // Truncate long messages
+      const content = m.content.substring(0, 150);
+      conversationText += `${role}: ${content}\n`;
     });
   }
 
   try {
     let parts = [];
-    let model = 'gemini-2.5-flash';
 
-    // Build prompt text
     const promptText = `${systemPrompt}
 
-Conversation:
 ${conversationText}
-
-Student: ${question || 'Help me with this exercise image'}
-
-Your response:`;
+Student: ${question || 'Help with this exercise'}`;
 
     // Handle image
     if (image) {
-      console.log('Processing image...');
-      
       let imageData = image;
       let mimeType = 'image/png';
 
-      // Parse data URL
       if (image.includes('base64,')) {
-        const parts = image.split('base64,');
-        if (parts.length === 2) {
-          imageData = parts[1];
-          
-          // Get mime type
+        const splitParts = image.split('base64,');
+        if (splitParts.length === 2) {
+          imageData = splitParts[1];
           const mimeMatch = image.match(/data:([^;]+);/);
-          if (mimeMatch) {
-            mimeType = mimeMatch[1];
-          }
+          if (mimeMatch) mimeType = mimeMatch[1];
         }
       }
 
-      console.log('Image type:', mimeType);
-      console.log('Image data length:', imageData.length);
-
       parts = [
         { text: promptText },
-        {
-          inlineData: {
-            mimeType: mimeType,
-            data: imageData
-          }
-        }
+        { inlineData: { mimeType: mimeType, data: imageData } }
       ];
     } else {
       parts = [{ text: promptText }];
     }
-
-    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
-
-    console.log('Calling Gemini:', model);
 
     const response = await fetch(`${API_URL}?key=${API_KEY}`, {
       method: 'POST',
@@ -109,13 +105,12 @@ Your response:`;
         contents: [{ parts: parts }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 500
+          maxOutputTokens: 200  // Reduced from 500
         }
       })
     });
 
     const data = await response.json();
-    console.log('Gemini status:', response.status);
 
     if (!response.ok) {
       console.error('Gemini error:', JSON.stringify(data));
@@ -125,29 +120,21 @@ Your response:`;
       });
     }
 
-    // Get reply
-    let reply = '';
-    if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-      reply = data.candidates[0].content.parts[0].text;
-      console.log('Reply:', reply.substring(0, 100));
-    } else {
-      console.log('No reply found in:', JSON.stringify(data).substring(0, 300));
-    }
+    let reply = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     if (!reply) {
-      return res.status(200).json({
-        reply: language === 'fr' 
-          ? "Je n'arrive pas à lire l'image. Peux-tu écrire l'exercice?" 
-          : language === 'ar'
-          ? "لم أتمكن من قراءة الصورة. هل يمكنك كتابة التمرين؟"
-          : "I couldn't read the image. Can you type the exercise?"
-      });
+      const fallbacks = {
+        en: "Can you type the exercise? I'll help you solve it.",
+        fr: "Peux-tu écrire l'exercice? Je t'aiderai à le résoudre.",
+        ar: "هل يمكنك كتابة التمرين؟ سأساعدك في حله."
+      };
+      reply = fallbacks[language] || fallbacks.en;
     }
 
     return res.status(200).json({ reply });
 
   } catch (error) {
     console.error('Error:', error);
-    return res.status(500).json({ error: 'Server error', details: error.message });
+    return res.status(500).json({ error: 'Server error' });
   }
 }
