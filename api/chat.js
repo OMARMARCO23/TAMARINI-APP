@@ -4,31 +4,29 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // ===== HANDLE PREFLIGHT =====
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
-  // ===== HANDLE GET =====
   if (req.method === 'GET') {
     res.status(200).json({
       message: "Tamrini API is working!",
-      usage: "POST /api/chat with { question, language, history }"
+      version: "2.0 - Image Support",
+      usage: "POST /api/chat with { question, language, history, image }"
     });
     return;
   }
 
-  // ===== HANDLE POST =====
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
 
-  const { question, language = 'en', history = [] } = req.body || {};
+  const { question, language = 'en', history = [], image } = req.body || {};
 
-  if (!question) {
-    res.status(400).json({ error: 'Question is required' });
+  if (!question && !image) {
+    res.status(400).json({ error: 'Question or image is required' });
     return;
   }
 
@@ -39,37 +37,36 @@ export default async function handler(req, res) {
     return;
   }
 
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  // Use Gemini 1.5 Flash for vision (supports images)
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
   // System prompts per language
   const prompts = {
     en: `You are Tamrini, a friendly math tutor for students aged 12-18.
 
 IMPORTANT RULES:
-- NEVER give the direct answer
+- NEVER give the direct answer immediately
+- If there's an image, first describe what math problem you see
 - Ask ONE guiding question to help them think
-- Keep responses SHORT (2-3 sentences max)
-- Be encouraging but natural
+- Keep responses SHORT (2-4 sentences max)
+- Be encouraging and friendly
 - Use simple language
 
-Example:
-Student: "What is 2x + 5 = 15?"
-You: "Good question! To find x, we need to isolate it. What operation would you do first to get rid of the +5?"
+If an image is provided, analyze the math exercise in the image and help the student solve it step by step.
 
 Respond in English.`,
 
     fr: `Tu es Tamrini, un tuteur de maths sympa pour les élèves de 12-18 ans.
 
 RÈGLES IMPORTANTES:
-- Ne JAMAIS donner la réponse directe
-- Pose UNE question pour les guider
-- Réponses COURTES (2-3 phrases max)
-- Sois encourageant mais naturel
+- Ne JAMAIS donner la réponse directement
+- S'il y a une image, décris d'abord le problème de maths que tu vois
+- Pose UNE question pour guider l'élève
+- Réponses COURTES (2-4 phrases max)
+- Sois encourageant et sympa
 - Utilise un langage simple
 
-Exemple:
-Élève: "Combien fait 2x + 5 = 15?"
-Toi: "Bonne question! Pour trouver x, on doit l'isoler. Quelle opération ferais-tu d'abord pour enlever le +5?"
+Si une image est fournie, analyse l'exercice de maths dans l'image et aide l'élève à le résoudre étape par étape.
 
 Réponds en français.`,
 
@@ -77,21 +74,20 @@ Réponds en français.`,
 
 القواعد المهمة:
 - لا تعطي الإجابة المباشرة أبداً
-- اطرح سؤالاً واحداً لتوجيههم
-- إجابات قصيرة (2-3 جمل كحد أقصى)
-- كن مشجعاً بشكل طبيعي
+- إذا كانت هناك صورة، صف أولاً مسألة الرياضيات التي تراها
+- اطرح سؤالاً واحداً لتوجيه الطالب
+- إجابات قصيرة (2-4 جمل كحد أقصى)
+- كن مشجعاً وودوداً
 - استخدم لغة بسيطة
 
-مثال:
-الطالب: "كم يساوي 2x + 5 = 15؟"
-أنت: "سؤال جيد! لإيجاد x، نحتاج لعزله. ما العملية التي ستفعلها أولاً للتخلص من +5؟"
+إذا تم تقديم صورة، حلل تمرين الرياضيات في الصورة وساعد الطالب على حله خطوة بخطوة.
 
 أجب بالعربية.`
   };
 
   const systemPrompt = prompts[language] || prompts.en;
 
-  // Build conversation history
+  // Build conversation history text
   let conversationText = '';
   if (history && history.length > 0) {
     history.forEach(function(m) {
@@ -100,39 +96,90 @@ Réponds en français.`,
     });
   }
 
-  const fullPrompt = `${systemPrompt}
+  try {
+    let requestBody;
+
+    if (image) {
+      // ===== REQUEST WITH IMAGE =====
+      console.log('Processing image request...');
+      
+      // Extract base64 data from data URL
+      let base64Data = image;
+      let mimeType = 'image/png';
+      
+      if (image.startsWith('data:')) {
+        const matches = image.match(/^data:(.+);base64,(.+)$/);
+        if (matches) {
+          mimeType = matches[1];
+          base64Data = matches[2];
+        }
+      }
+
+      const fullPrompt = `${systemPrompt}
 
 CONVERSATION SO FAR:
 ${conversationText}
+
+Student's message: ${question || 'Please help me with this exercise'}
+
+Look at the image and help the student. Remember: guide them, don't give the answer directly.`;
+
+      requestBody = {
+        contents: [{
+          parts: [
+            { text: fullPrompt },
+            {
+              inline_data: {
+                mime_type: mimeType,
+                data: base64Data
+              }
+            }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 500
+        }
+      };
+
+    } else {
+      // ===== TEXT ONLY REQUEST =====
+      console.log('Processing text request...');
+
+      const fullPrompt = `${systemPrompt}
+
+CONVERSATION SO FAR:
+${conversationText}
+
 Student: ${question}
 
-Your response (remember: guide, don't give answers):`;
+Your response (remember: guide, don't give answers directly):`;
 
-  try {
+      requestBody = {
+        contents: [{
+          parts: [{ text: fullPrompt }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 500
+        }
+      };
+    }
+
+    console.log('Calling Gemini API...');
+
     const response = await fetch(`${API_URL}?key=${API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ 
-          parts: [{ text: fullPrompt }] 
-        }],
-
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 500,  // Increased from 300
-          topP: 0.9,
-          topK: 40
-        }
-      })
+      body: JSON.stringify(requestBody)
     });
 
     const data = await response.json();
 
-    // Log for debugging
-    console.log('Gemini raw response:', JSON.stringify(data));
+    console.log('Gemini response status:', response.status);
 
     if (!response.ok) {
-      console.error('Gemini Error:', data);
+      console.error('Gemini Error:', JSON.stringify(data));
       res.status(500).json({
         error: 'Gemini error',
         details: data.error?.message || 'Unknown error'
@@ -140,9 +187,8 @@ Your response (remember: guide, don't give answers):`;
       return;
     }
 
-    // Extract reply from response
+    // Extract reply
     let reply = '';
-    
     try {
       if (data.candidates && 
           data.candidates.length > 0 && 
@@ -158,9 +204,9 @@ Your response (remember: guide, don't give answers):`;
     // Fallback if no reply
     if (!reply || reply.trim() === '') {
       const fallbacks = {
-        en: "I'm here to help! Could you tell me more about the problem you're working on?",
-        fr: "Je suis là pour t'aider! Peux-tu m'en dire plus sur le problème?",
-        ar: "أنا هنا للمساعدة! هل يمكنك إخباري المزيد عن المسألة؟"
+        en: "I can see your exercise! Could you tell me what part you're having trouble with?",
+        fr: "Je vois ton exercice! Quelle partie te pose problème?",
+        ar: "أرى تمرينك! ما الجزء الذي تواجه صعوبة فيه؟"
       };
       reply = fallbacks[language] || fallbacks.en;
     }
