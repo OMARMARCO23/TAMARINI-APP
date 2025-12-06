@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // CORS
+  // ==== CORS ====
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -63,7 +63,7 @@ Réponds en français.`,
     history.slice(-4).forEach(m => {
       const role = m.role === 'assistant' ? 'T' : 'S';
       // Truncate long messages
-      const content = m.content.substring(0, 150);
+      const content = (m.content || '').substring(0, 150);
       conversationText += `${role}: ${content}\n`;
     });
   }
@@ -102,21 +102,38 @@ Student: ${question || 'Help with this exercise'}`;
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: parts }],
+        contents: [{ parts }],
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 200  // Reduced from 500
+          maxOutputTokens: 200 // Reduced from 500
         }
       })
     });
 
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      console.error('Failed to parse Gemini response as JSON', e);
+      return res.status(502).json({ error: 'Invalid response from Gemini API' });
+    }
 
+    // ===== IMPROVED ERROR HANDLING / STATUS PROPAGATION =====
     if (!response.ok) {
-      console.error('Gemini error:', JSON.stringify(data));
-      return res.status(500).json({
-        error: 'Gemini error',
-        details: data.error?.message || 'Unknown'
+      console.error('Gemini error:', response.status, JSON.stringify(data));
+
+      const geminiStatus = response.status; // Usually 4xx or 5xx
+      const geminiCode = data.error?.status || null;
+      const geminiMessage = data.error?.message || 'Gemini API error';
+
+      // If it's a rate-limit / quota error, surface 429 to the client
+      // (so the frontend can show "Please wait 30s" instead of generic 500)
+      const statusToSend = geminiStatus || 502;
+
+      return res.status(statusToSend).json({
+        error: geminiMessage,
+        code: geminiCode,
+        geminiStatus
       });
     }
 
@@ -134,7 +151,7 @@ Student: ${question || 'Help with this exercise'}`;
     return res.status(200).json({ reply });
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('Server error:', error);
     return res.status(500).json({ error: 'Server error' });
   }
 }
