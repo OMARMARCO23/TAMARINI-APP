@@ -27,10 +27,15 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'API key not configured' });
   }
 
-  // ===== USE GEMINI 2.5 FLASH =====
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
+  // ===== MODEL FALLBACK ORDER =====
+  // You can change the order or remove models you don't want to use.
+  const MODEL_ORDER = [
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-2.5-pro'
+  ];
 
-  // ===== SHORTER PROMPTS = LESS TOKENS =====
+  // ===== PROMPTS =====
   const prompts = {
     en: `You are Tamrini, a math tutor. Rules:
 - If image: describe the math problem briefly
@@ -56,27 +61,25 @@ Réponds en français.`,
 
   const systemPrompt = prompts[language] || prompts.en;
 
-  // ===== SHORTER HISTORY = LESS TOKENS =====
+  // ===== SHORTER HISTORY =====
   let conversationText = '';
   if (history && history.length > 0) {
-    // Only use last 4 messages instead of 6
     history.slice(-4).forEach(m => {
       const role = m.role === 'assistant' ? 'T' : 'S';
-      // Truncate long messages
       const content = (m.content || '').substring(0, 150);
       conversationText += `${role}: ${content}\n`;
     });
   }
 
   try {
-    let parts = [];
-
+    // Build prompt + parts (with optional image)
     const promptText = `${systemPrompt}
 
 ${conversationText}
 Student: ${question || 'Help with this exercise'}`;
 
-    // Handle image
+    let parts = [];
+
     if (image) {
       let imageData = image;
       let mimeType = 'image/png';
@@ -98,44 +101,12 @@ Student: ${question || 'Help with this exercise'}`;
       parts = [{ text: promptText }];
     }
 
-    const response = await fetch(`${API_URL}?key=${API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 200 // Reduced from 500
-        }
-      })
+    // ===== CALL GEMINI WITH FALLBACK =====
+    const { data, modelUsed } = await callGeminiWithFallback({
+      apiKey: API_KEY,
+      models: MODEL_ORDER,
+      parts
     });
-
-    let data;
-    try {
-      data = await response.json();
-    } catch (e) {
-      console.error('Failed to parse Gemini response as JSON', e);
-      return res.status(502).json({ error: 'Invalid response from Gemini API' });
-    }
-
-    // ===== IMPROVED ERROR HANDLING / STATUS PROPAGATION =====
-    if (!response.ok) {
-      console.error('Gemini error:', response.status, JSON.stringify(data));
-
-      const geminiStatus = response.status; // Usually 4xx or 5xx
-      const geminiCode = data.error?.status || null;
-      const geminiMessage = data.error?.message || 'Gemini API error';
-
-      // If it's a rate-limit / quota error, surface 429 to the client
-      // (so the frontend can show "Please wait 30s" instead of generic 500)
-      const statusToSend = geminiStatus || 502;
-
-      return res.status(statusToSend).json({
-        error: geminiMessage,
-        code: geminiCode,
-        geminiStatus
-      });
-    }
 
     let reply = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
@@ -148,10 +119,104 @@ Student: ${question || 'Help with this exercise'}`;
       reply = fallbacks[language] || fallbacks.en;
     }
 
-    return res.status(200).json({ reply });
+    // You can return modelUsed for debugging if you like
+    return res.status(200).json({ reply, model: modelUsed });
 
   } catch (error) {
     console.error('Server error:', error);
-    return res.status(500).json({ error: 'Server error' });
+    const status = error.status || 500;
+    return res.status(status).json({
+      error: error.message || 'Server error',
+      code: error.code || null
+    });
   }
+}
+
+/**
+ * Try calling Gemini models in order.
+ * If a model returns a quota / 429 error, try the next one.
+ * If a model returns another error, stop and throw.
+ */
+async function callGeminiWithFallback({ apiKey, models, parts }) {
+  const generationConfig = {
+    temperature: 0.7,
+    maxOutputTokens: 200
+  };
+
+  let lastError = null;
+
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig
+        })
+      });
+
+      let data;
+      try {
+        data = await response.json();
+      } catch (e) {
+        console.error(`Failed to parse Gemini response for ${model}`, e);
+        const err = new Error('Invalid response from Gemini API');
+        err.status = 502;
+        throw err;
+      }
+
+      if (response.ok && !data.error) {
+        // Success
+        console.log(`Gemini call succeeded with model: ${model}`);
+        return { data, modelUsed: model };
+      }
+
+      const status = response.status;
+      const code = data.error?.status || null;
+      const message = data.error?.message || 'Gemini API error';
+
+      const msgLower = (message || '').toLowerCase();
+      const isQuotaError =
+        status === 429 ||
+        code === 'RESOURCE_EXHAUSTED' ||
+        msgLower.includes('quota') ||
+        msgLower.includes('rate limit') ||
+        msgLower.includes('too many requests');
+
+      if (isQuotaError) {
+        console.warn(`Quota error for model ${model}, trying next model if available...`, message);
+        lastError = { status, code, message };
+        // Continue loop to try the next model
+        continue;
+      }
+
+      // Non-quota error: stop here
+      console.error(`Non-quota error for model ${model}:`, message);
+      const err = new Error(message);
+      err.status = status;
+      err.code = code;
+      throw err;
+
+    } catch (err) {
+      // Network or parse-level error
+      console.error(`Error calling Gemini model ${model}:`, err);
+      lastError = {
+        status: err.status || 500,
+        code: err.code || null,
+        message: err.message || 'Gemini API error'
+      };
+      // For network errors you might want to *not* try the next model,
+      // but here we just break to avoid cascading.
+      break;
+    }
+  }
+
+  // If we got here, all models failed
+  const error = new Error(lastError?.message || 'Gemini API error');
+  error.status = lastError?.status || 502;
+  error.code = lastError?.code || null;
+  throw error;
 }
