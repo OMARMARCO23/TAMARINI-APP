@@ -38,7 +38,7 @@ export default async function handler(req, res) {
   }
 
   // Use Gemini 1.5 Flash for vision (supports images)
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
   // System prompts per language
   const prompts = {
