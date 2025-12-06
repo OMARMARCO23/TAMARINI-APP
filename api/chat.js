@@ -28,7 +28,7 @@ export default async function handler(req, res) {
   }
 
   // ===== USE GEMINI 2.5 FLASH =====
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent';
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
   // ===== SHORTER PROMPTS = LESS TOKENS =====
   const prompts = {
