@@ -1,247 +1,153 @@
 export default async function handler(req, res) {
-  // ===== CORS HEADERS =====
+  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
+    return res.status(200).end();
   }
 
   if (req.method === 'GET') {
-    res.status(200).json({
-      message: "Tamrini API v2.1 - Image Support",
-      status: "online"
-    });
-    return;
+    return res.status(200).json({ message: "Tamrini API v2.2" });
   }
 
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
-    return;
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   const { question, language = 'en', history = [], image } = req.body || {};
 
-  console.log('=== NEW REQUEST ===');
+  console.log('--- NEW REQUEST ---');
   console.log('Question:', question);
   console.log('Language:', language);
-  console.log('Has Image:', !!image);
-  console.log('Image length:', image ? image.length : 0);
+  console.log('Has image:', !!image);
 
   if (!question && !image) {
-    res.status(400).json({ error: 'Question or image is required' });
-    return;
+    return res.status(400).json({ error: 'Question or image required' });
   }
 
   const API_KEY = process.env.GOOGLE_API_KEY;
-
   if (!API_KEY) {
-    res.status(500).json({ error: 'API key not configured' });
-    return;
+    return res.status(500).json({ error: 'API key not configured' });
   }
 
-  // Use gemini-2.0-flash-exp for vision
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
-
   const prompts = {
-    en: `You are Tamrini, a friendly math tutor for students aged 12-18.
-
-YOUR TASK:
-1. If there's an image, CAREFULLY read and describe the math exercise you see
-2. Identify the type of problem (equation, geometry, etc.)
-3. Ask ONE guiding question to help the student solve it
-4. NEVER give the direct answer
-
-Keep your response to 3-5 sentences. Be encouraging!
-
-Respond in English.`,
-
-    fr: `Tu es Tamrini, un tuteur de maths sympa pour les élèves de 12-18 ans.
-
-TA MISSION:
-1. S'il y a une image, LIS ATTENTIVEMENT et décris l'exercice de maths que tu vois
-2. Identifie le type de problème (équation, géométrie, etc.)
-3. Pose UNE question pour guider l'élève
-4. Ne donne JAMAIS la réponse directe
-
-Limite ta réponse à 3-5 phrases. Sois encourageant!
-
-Réponds en français.`,
-
-    ar: `أنت تمريني، معلم رياضيات ودود للطلاب من 12-18 سنة.
-
-مهمتك:
-1. إذا كانت هناك صورة، اقرأ بعناية وصف تمرين الرياضيات الذي تراه
-2. حدد نوع المسألة (معادلة، هندسة، إلخ)
-3. اطرح سؤالاً واحداً لتوجيه الطالب
-4. لا تعطي الإجابة المباشرة أبداً
-
-اجعل ردك 3-5 جمل. كن مشجعاً!
-
-أجب بالعربية.`
+    en: `You are Tamrini, a math tutor. If there's an image, describe the math problem you see. Never give direct answers. Ask guiding questions. Keep responses short (2-4 sentences). Respond in English.`,
+    fr: `Tu es Tamrini, tuteur de maths. S'il y a une image, décris le problème de maths. Ne donne jamais la réponse directe. Pose des questions pour guider. Réponses courtes (2-4 phrases). Réponds en français.`,
+    ar: `أنت تمريني معلم رياضيات. إذا كانت هناك صورة، صف المسألة. لا تعطي الإجابة مباشرة. اطرح أسئلة توجيهية. إجابات قصيرة. أجب بالعربية.`
   };
 
   const systemPrompt = prompts[language] || prompts.en;
 
-  // Build conversation
   let conversationText = '';
   if (history && history.length > 0) {
-    history.slice(-6).forEach(function(m) {
+    history.slice(-6).forEach(m => {
       conversationText += (m.role === 'assistant' ? 'Tutor' : 'Student') + ': ' + m.content + '\n';
     });
   }
 
   try {
-    let contents = [];
+    let parts = [];
+    let model = 'gemini-2.0-flash';
 
+    // Build prompt text
+    const promptText = `${systemPrompt}
+
+Conversation:
+${conversationText}
+
+Student: ${question || 'Help me with this exercise image'}
+
+Your response:`;
+
+    // Handle image
     if (image) {
-      // ===== WITH IMAGE =====
       console.log('Processing image...');
       
-      // Parse base64 image
-      let base64Data = image;
+      let imageData = image;
       let mimeType = 'image/png';
-      
-      if (image.startsWith('data:')) {
-        const regex = /^data:([^;]+);base64,(.+)$/;
-        const matches = image.match(regex);
-        if (matches && matches.length === 3) {
-          mimeType = matches[1];
-          base64Data = matches[2];
-          console.log('Image parsed - Type:', mimeType, 'Data length:', base64Data.length);
-        } else {
-          console.log('Failed to parse image data URL');
+
+      // Parse data URL
+      if (image.includes('base64,')) {
+        const parts = image.split('base64,');
+        if (parts.length === 2) {
+          imageData = parts[1];
+          
+          // Get mime type
+          const mimeMatch = image.match(/data:([^;]+);/);
+          if (mimeMatch) {
+            mimeType = mimeMatch[1];
+          }
         }
       }
 
-      const userMessage = question || 'Regarde cette image et aide-moi avec cet exercice';
+      console.log('Image type:', mimeType);
+      console.log('Image data length:', imageData.length);
 
-      contents = [{
-        parts: [
-          {
-            text: `${systemPrompt}
-
-Previous conversation:
-${conversationText}
-
-Student says: ${userMessage}
-
-[The student has shared an image of a math exercise. Look at the image carefully, describe what you see, and help them.]`
-          },
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Data
-            }
+      parts = [
+        { text: promptText },
+        {
+          inlineData: {
+            mimeType: mimeType,
+            data: imageData
           }
-        ]
-      }];
-
+        }
+      ];
     } else {
-      // ===== TEXT ONLY =====
-      console.log('Processing text only...');
-
-      contents = [{
-        parts: [{
-          text: `${systemPrompt}
-
-Previous conversation:
-${conversationText}
-
-Student: ${question}
-
-Your response (guide them, don't give the answer):`
-        }]
-      }];
+      parts = [{ text: promptText }];
     }
 
-    const requestBody = {
-      contents: contents,
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 600,
-        topP: 0.9
-      }
-    };
+    const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
-    console.log('Calling Gemini API...');
+    console.log('Calling Gemini:', model);
 
     const response = await fetch(`${API_URL}?key=${API_KEY}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
+      body: JSON.stringify({
+        contents: [{ parts: parts }],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 500
+        }
+      })
     });
 
     const data = await response.json();
-
     console.log('Gemini status:', response.status);
-    console.log('Gemini response:', JSON.stringify(data).substring(0, 500));
 
     if (!response.ok) {
-      console.error('Gemini Error:', data);
-      
-      // If model not found, try alternative
-      if (data.error?.message?.includes('not found')) {
-        console.log('Trying alternative model...');
-        
-        // Try gemini-1.5-flash
-        const altURL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
-        
-        const altResponse = await fetch(`${altURL}?key=${API_KEY}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
-        });
-        
-        const altData = await altResponse.json();
-        console.log('Alt model response:', altResponse.status);
-        
-        if (altResponse.ok && altData.candidates?.[0]?.content?.parts?.[0]?.text) {
-          res.status(200).json({ reply: altData.candidates[0].content.parts[0].text });
-          return;
-        }
-      }
-      
-      res.status(500).json({
+      console.error('Gemini error:', JSON.stringify(data));
+      return res.status(500).json({
         error: 'Gemini error',
-        details: data.error?.message || 'Unknown error'
+        details: data.error?.message || 'Unknown'
       });
-      return;
     }
 
-    // Extract reply
+    // Get reply
     let reply = '';
-    
-    if (data.candidates && 
-        data.candidates[0] && 
-        data.candidates[0].content && 
-        data.candidates[0].content.parts && 
-        data.candidates[0].content.parts[0] &&
-        data.candidates[0].content.parts[0].text) {
+    if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
       reply = data.candidates[0].content.parts[0].text;
-      console.log('Got reply:', reply.substring(0, 100));
+      console.log('Reply:', reply.substring(0, 100));
     } else {
-      console.log('No valid reply in response');
-      console.log('Full response:', JSON.stringify(data));
+      console.log('No reply found in:', JSON.stringify(data).substring(0, 300));
     }
 
-    // Only use fallback if really empty
-    if (!reply || reply.trim() === '') {
-      console.log('Using fallback response');
-      const fallbacks = {
-        en: "I can see your exercise! Could you type out the problem or tell me what part is confusing you?",
-        fr: "Je vois ton exercice! Peux-tu me dire quel est le problème ou quelle partie te pose difficulté?",
-        ar: "أرى تمرينك! هل يمكنك كتابة المسألة أو إخباري بالجزء الذي يصعب عليك؟"
-      };
-      reply = fallbacks[language] || fallbacks.en;
+    if (!reply) {
+      return res.status(200).json({
+        reply: language === 'fr' 
+          ? "Je n'arrive pas à lire l'image. Peux-tu écrire l'exercice?" 
+          : language === 'ar'
+          ? "لم أتمكن من قراءة الصورة. هل يمكنك كتابة التمرين؟"
+          : "I couldn't read the image. Can you type the exercise?"
+      });
     }
 
-    res.status(200).json({ reply: reply });
+    return res.status(200).json({ reply });
 
   } catch (error) {
-    console.error('Catch error:', error);
-    res.status(500).json({ error: 'Server error', details: error.message });
+    console.error('Error:', error);
+    return res.status(500).json({ error: 'Server error', details: error.message });
   }
 }
