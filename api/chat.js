@@ -11,9 +11,8 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     res.status(200).json({
-      message: "Tamrini API is working!",
-      version: "2.0 - Image Support",
-      usage: "POST /api/chat with { question, language, history, image }"
+      message: "Tamrini API v2.1 - Image Support",
+      status: "online"
     });
     return;
   }
@@ -24,6 +23,12 @@ export default async function handler(req, res) {
   }
 
   const { question, language = 'en', history = [], image } = req.body || {};
+
+  console.log('=== NEW REQUEST ===');
+  console.log('Question:', question);
+  console.log('Language:', language);
+  console.log('Has Image:', !!image);
+  console.log('Image length:', image ? image.length : 0);
 
   if (!question && !image) {
     res.status(400).json({ error: 'Question or image is required' });
@@ -37,134 +42,129 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Use Gemini 1.5 Flash for vision (supports images)
-  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  // Use gemini-2.0-flash-exp for vision
+  const API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent';
 
-  // System prompts per language
   const prompts = {
     en: `You are Tamrini, a friendly math tutor for students aged 12-18.
 
-IMPORTANT RULES:
-- NEVER give the direct answer immediately
-- If there's an image, first describe what math problem you see
-- Ask ONE guiding question to help them think
-- Keep responses SHORT (2-4 sentences max)
-- Be encouraging and friendly
-- Use simple language
+YOUR TASK:
+1. If there's an image, CAREFULLY read and describe the math exercise you see
+2. Identify the type of problem (equation, geometry, etc.)
+3. Ask ONE guiding question to help the student solve it
+4. NEVER give the direct answer
 
-If an image is provided, analyze the math exercise in the image and help the student solve it step by step.
+Keep your response to 3-5 sentences. Be encouraging!
 
 Respond in English.`,
 
     fr: `Tu es Tamrini, un tuteur de maths sympa pour les élèves de 12-18 ans.
 
-RÈGLES IMPORTANTES:
-- Ne JAMAIS donner la réponse directement
-- S'il y a une image, décris d'abord le problème de maths que tu vois
-- Pose UNE question pour guider l'élève
-- Réponses COURTES (2-4 phrases max)
-- Sois encourageant et sympa
-- Utilise un langage simple
+TA MISSION:
+1. S'il y a une image, LIS ATTENTIVEMENT et décris l'exercice de maths que tu vois
+2. Identifie le type de problème (équation, géométrie, etc.)
+3. Pose UNE question pour guider l'élève
+4. Ne donne JAMAIS la réponse directe
 
-Si une image est fournie, analyse l'exercice de maths dans l'image et aide l'élève à le résoudre étape par étape.
+Limite ta réponse à 3-5 phrases. Sois encourageant!
 
 Réponds en français.`,
 
     ar: `أنت تمريني، معلم رياضيات ودود للطلاب من 12-18 سنة.
 
-القواعد المهمة:
-- لا تعطي الإجابة المباشرة أبداً
-- إذا كانت هناك صورة، صف أولاً مسألة الرياضيات التي تراها
-- اطرح سؤالاً واحداً لتوجيه الطالب
-- إجابات قصيرة (2-4 جمل كحد أقصى)
-- كن مشجعاً وودوداً
-- استخدم لغة بسيطة
+مهمتك:
+1. إذا كانت هناك صورة، اقرأ بعناية وصف تمرين الرياضيات الذي تراه
+2. حدد نوع المسألة (معادلة، هندسة، إلخ)
+3. اطرح سؤالاً واحداً لتوجيه الطالب
+4. لا تعطي الإجابة المباشرة أبداً
 
-إذا تم تقديم صورة، حلل تمرين الرياضيات في الصورة وساعد الطالب على حله خطوة بخطوة.
+اجعل ردك 3-5 جمل. كن مشجعاً!
 
 أجب بالعربية.`
   };
 
   const systemPrompt = prompts[language] || prompts.en;
 
-  // Build conversation history text
+  // Build conversation
   let conversationText = '';
   if (history && history.length > 0) {
-    history.forEach(function(m) {
-      const role = m.role === 'assistant' ? 'Tutor' : 'Student';
-      conversationText += role + ': ' + m.content + '\n';
+    history.slice(-6).forEach(function(m) {
+      conversationText += (m.role === 'assistant' ? 'Tutor' : 'Student') + ': ' + m.content + '\n';
     });
   }
 
   try {
-    let requestBody;
+    let contents = [];
 
     if (image) {
-      // ===== REQUEST WITH IMAGE =====
-      console.log('Processing image request...');
+      // ===== WITH IMAGE =====
+      console.log('Processing image...');
       
-      // Extract base64 data from data URL
+      // Parse base64 image
       let base64Data = image;
       let mimeType = 'image/png';
       
       if (image.startsWith('data:')) {
-        const matches = image.match(/^data:(.+);base64,(.+)$/);
-        if (matches) {
+        const regex = /^data:([^;]+);base64,(.+)$/;
+        const matches = image.match(regex);
+        if (matches && matches.length === 3) {
           mimeType = matches[1];
           base64Data = matches[2];
+          console.log('Image parsed - Type:', mimeType, 'Data length:', base64Data.length);
+        } else {
+          console.log('Failed to parse image data URL');
         }
       }
 
-      const fullPrompt = `${systemPrompt}
+      const userMessage = question || 'Regarde cette image et aide-moi avec cet exercice';
 
-CONVERSATION SO FAR:
+      contents = [{
+        parts: [
+          {
+            text: `${systemPrompt}
+
+Previous conversation:
 ${conversationText}
 
-Student's message: ${question || 'Please help me with this exercise'}
+Student says: ${userMessage}
 
-Look at the image and help the student. Remember: guide them, don't give the answer directly.`;
-
-      requestBody = {
-        contents: [{
-          parts: [
-            { text: fullPrompt },
-            {
-              inline_data: {
-                mime_type: mimeType,
-                data: base64Data
-              }
+[The student has shared an image of a math exercise. Look at the image carefully, describe what you see, and help them.]`
+          },
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Data
             }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 500
-        }
-      };
+          }
+        ]
+      }];
 
     } else {
-      // ===== TEXT ONLY REQUEST =====
-      console.log('Processing text request...');
+      // ===== TEXT ONLY =====
+      console.log('Processing text only...');
 
-      const fullPrompt = `${systemPrompt}
+      contents = [{
+        parts: [{
+          text: `${systemPrompt}
 
-CONVERSATION SO FAR:
+Previous conversation:
 ${conversationText}
 
 Student: ${question}
 
-Your response (remember: guide, don't give answers directly):`;
-
-      requestBody = {
-        contents: [{
-          parts: [{ text: fullPrompt }]
-        }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 500
-        }
-      };
+Your response (guide them, don't give the answer):`
+        }]
+      }];
     }
+
+    const requestBody = {
+      contents: contents,
+      generationConfig: {
+        temperature: 0.7,
+        maxOutputTokens: 600,
+        topP: 0.9
+      }
+    };
 
     console.log('Calling Gemini API...');
 
@@ -176,10 +176,34 @@ Your response (remember: guide, don't give answers directly):`;
 
     const data = await response.json();
 
-    console.log('Gemini response status:', response.status);
+    console.log('Gemini status:', response.status);
+    console.log('Gemini response:', JSON.stringify(data).substring(0, 500));
 
     if (!response.ok) {
-      console.error('Gemini Error:', JSON.stringify(data));
+      console.error('Gemini Error:', data);
+      
+      // If model not found, try alternative
+      if (data.error?.message?.includes('not found')) {
+        console.log('Trying alternative model...');
+        
+        // Try gemini-1.5-flash
+        const altURL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
+        
+        const altResponse = await fetch(`${altURL}?key=${API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+        
+        const altData = await altResponse.json();
+        console.log('Alt model response:', altResponse.status);
+        
+        if (altResponse.ok && altData.candidates?.[0]?.content?.parts?.[0]?.text) {
+          res.status(200).json({ reply: altData.candidates[0].content.parts[0].text });
+          return;
+        }
+      }
+      
       res.status(500).json({
         error: 'Gemini error',
         details: data.error?.message || 'Unknown error'
@@ -189,24 +213,27 @@ Your response (remember: guide, don't give answers directly):`;
 
     // Extract reply
     let reply = '';
-    try {
-      if (data.candidates && 
-          data.candidates.length > 0 && 
-          data.candidates[0].content && 
-          data.candidates[0].content.parts && 
-          data.candidates[0].content.parts.length > 0) {
-        reply = data.candidates[0].content.parts[0].text;
-      }
-    } catch (e) {
-      console.error('Parse error:', e);
+    
+    if (data.candidates && 
+        data.candidates[0] && 
+        data.candidates[0].content && 
+        data.candidates[0].content.parts && 
+        data.candidates[0].content.parts[0] &&
+        data.candidates[0].content.parts[0].text) {
+      reply = data.candidates[0].content.parts[0].text;
+      console.log('Got reply:', reply.substring(0, 100));
+    } else {
+      console.log('No valid reply in response');
+      console.log('Full response:', JSON.stringify(data));
     }
 
-    // Fallback if no reply
+    // Only use fallback if really empty
     if (!reply || reply.trim() === '') {
+      console.log('Using fallback response');
       const fallbacks = {
-        en: "I can see your exercise! Could you tell me what part you're having trouble with?",
-        fr: "Je vois ton exercice! Quelle partie te pose problème?",
-        ar: "أرى تمرينك! ما الجزء الذي تواجه صعوبة فيه؟"
+        en: "I can see your exercise! Could you type out the problem or tell me what part is confusing you?",
+        fr: "Je vois ton exercice! Peux-tu me dire quel est le problème ou quelle partie te pose difficulté?",
+        ar: "أرى تمرينك! هل يمكنك كتابة المسألة أو إخباري بالجزء الذي يصعب عليك؟"
       };
       reply = fallbacks[language] || fallbacks.en;
     }
@@ -214,7 +241,7 @@ Your response (remember: guide, don't give answers directly):`;
     res.status(200).json({ reply: reply });
 
   } catch (error) {
-    console.error('Fetch error:', error);
+    console.error('Catch error:', error);
     res.status(500).json({ error: 'Server error', details: error.message });
   }
 }
