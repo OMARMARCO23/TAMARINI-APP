@@ -49,7 +49,7 @@ export default async function handler(req, res) {
 
   try {
     let parts = [];
-    let model = 'gemini-2.0-flash';
+    let model = 'gemini-2.5-flash';
 
     // Build prompt text
     const promptText = `${systemPrompt}
